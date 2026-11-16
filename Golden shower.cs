@@ -13,9 +13,9 @@ namespace GoldenShowerZeroGPlugin
     public class GoldenShowerZeroG : TerrariaPlugin
     {
         public override string Name => "GoldenShowerZeroG";
-        public override System.Version Version => new System.Version(1, 2, 0);
+        public override System.Version Version => new System.Version(1, 2, 1);
         public override string Author => "CustomPlugin";
-        public override string Description => "Membajak paket proyektil Golden Shower agar hanya muncul 1 garis lurus tunggal.";
+        public override string Description => "Mencegat paket proyektil Golden Shower agar hanya muncul 1 garis lurus tunggal.";
 
         private Dictionary<int, Vector2> straightStreams = new Dictionary<int, Vector2>();
 
@@ -44,7 +44,7 @@ namespace GoldenShowerZeroGPlugin
 
         private void CheckStatusCommand(CommandArgs args)
         {
-            args.Player.SendSuccessMessage("[GoldenShowerZeroG v1.2] Aktif! Paket proyektil Golden Shower dibajak langsung menjadi 1 garis lurus.");
+            args.Player.SendSuccessMessage("[GoldenShowerZeroG v1.2.1] Aktif! Paket proyektil Golden Shower dibajak langsung menjadi 1 garis lurus.");
         }
 
         private void OnGetData(GetDataEventArgs args)
@@ -73,47 +73,32 @@ namespace GoldenShowerZeroGPlugin
 
                     if (type == ProjectileID.GoldenShowerFriendly)
                     {
-                        // Hentikan paket asli dari HP sebelum disebar/diproses
+                        // Hentikan paket asli dari HP sebelum disebar ke pemain lain
                         args.Handled = true;
 
                         Vector2 straightVel = velocity * 1.35f;
+                        int dmg = tsPlayer.TPlayer.GetWeaponDamage(tsPlayer.TPlayer.HeldItem);
+                        float kb = tsPlayer.TPlayer.HeldItem.knockBack;
 
-                        // Cari slot proyektil milik player dengan identity yang sama, atau buat baru dengan identity yang sama
-                        int projIdx = -1;
-                        for (int i = 0; i < Main.maxProjectiles; i++)
-                        {
-                            if (Main.projectile[i].active && Main.projectile[i].owner == plrIdx && Main.projectile[i].identity == identity)
-                            {
-                                projIdx = i;
-                                break;
-                            }
-                        }
-
-                        if (projIdx == -1)
-                        {
-                            projIdx = Projectile.NewProjectile(
-                                Projectile.GetNoneSource(),
-                                position,
-                                straightVel,
-                                ProjectileID.GoldenShowerFriendly,
-                                tsPlayer.TPlayer.GetWeaponDamage(tsPlayer.TPlayer.HeldItem),
-                                tsPlayer.TPlayer.HeldItem.knockBack,
-                                plrIdx
-                            );
-                        }
+                        int projIdx = Projectile.NewProjectile(
+                            Projectile.GetNoneSource(),
+                            position,
+                            straightVel,
+                            ProjectileID.GoldenShowerFriendly,
+                            dmg,
+                            kb,
+                            Main.maxPlayers
+                        );
 
                         if (projIdx >= 0 && projIdx < Main.maxProjectiles)
                         {
                             Projectile p = Main.projectile[projIdx];
-                            p.identity = identity; // Kunci utama: pakai identity asli milik HP agar HP menimpa garis bawah dengan garis lurus!
-                            p.position = position - new Vector2(p.width * 0.5f, p.height * 0.5f);
-                            p.velocity = straightVel;
                             p.friendly = true;
                             p.hostile = false;
 
                             straightStreams[projIdx] = straightVel;
 
-                            // Kirim balik ke SEMUA pemain termasuk penembak (ignoreClient = -1)
+                            // Kirim proyektil lurus ke semua pemain
                             NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, projIdx);
                         }
                     }
