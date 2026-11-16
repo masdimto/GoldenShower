@@ -12,11 +12,11 @@ namespace GoldenShowerZeroGPlugin
     public class GoldenShowerZeroG : TerrariaPlugin
     {
         public override string Name => "GoldenShowerZeroG";
-        public override System.Version Version => new System.Version(1, 0, 1);
+        public override System.Version Version => new System.Version(1, 1, 0);
         public override string Author => "CustomPlugin";
-        public override string Description => "Proyektil Golden Shower melesat lurus tanpa gravitasi.";
+        public override string Description => "Proyektil Golden Shower tunggal melesat lurus tanpa cabang.";
 
-        private Dictionary<int, Vector2> lockedVelocities = new Dictionary<int, Vector2>();
+        private Dictionary<int, Vector2> serverStraightStreams = new Dictionary<int, Vector2>();
 
         public GoldenShowerZeroG(Main game) : base(game) { }
 
@@ -41,7 +41,7 @@ namespace GoldenShowerZeroGPlugin
 
         private void CheckStatusCommand(CommandArgs args)
         {
-            args.Player.SendSuccessMessage("[GoldenShowerZeroG] Aktif! Golden Shower otomatis menembak lurus tanpa melengkung jatuh.");
+            args.Player.SendSuccessMessage("[GoldenShowerZeroG] Aktif! Golden Shower menembak 1 garis lurus tunggal.");
         }
 
         private void OnGameUpdate(EventArgs args)
@@ -52,39 +52,57 @@ namespace GoldenShowerZeroGPlugin
 
                 if (!proj.active || proj.type != ProjectileID.GoldenShowerFriendly)
                 {
-                    if (lockedVelocities.ContainsKey(p))
-                        lockedVelocities.Remove(p);
+                    if (serverStraightStreams.ContainsKey(p))
+                        serverStraightStreams.Remove(p);
                     continue;
                 }
 
-                int owner = proj.owner;
-                if (owner < 0 || owner >= Main.maxPlayers)
-                    continue;
-
-                TSPlayer tsPlayer = TShock.Players[owner];
-                if (tsPlayer == null || !tsPlayer.Active || tsPlayer.TPlayer == null)
-                    continue;
-
-                if (!tsPlayer.HasPermission("goldenshower.zerog"))
-                    continue;
-
-                if (!lockedVelocities.ContainsKey(p))
+                // 1. Jika ini adalah proyektil milik PLAYER (yang bikin bercabang), matikan dan ganti dengan proyektil SERVER lurus
+                if (proj.owner >= 0 && proj.owner < Main.maxPlayers)
                 {
-                    if (proj.velocity.LengthSquared() > 0.1f)
-                    {
-                        lockedVelocities[p] = proj.velocity * 1.35f;
-                    }
-                    else
-                    {
+                    TSPlayer tsPlayer = TShock.Players[proj.owner];
+                    if (tsPlayer == null || !tsPlayer.Active || tsPlayer.TPlayer == null || !tsPlayer.HasPermission("goldenshower.zerog"))
                         continue;
+
+                    Vector2 spawnPos = proj.Center;
+                    Vector2 straightVel = proj.velocity * 1.35f;
+                    int dmg = proj.damage;
+                    float kb = proj.knockBack;
+
+                    // Hapus proyektil asli player agar tidak muncul cabang kedua di layar HP
+                    proj.Kill();
+                    NetMessage.SendData((int)PacketTypes.ProjectileDestroy, -1, -1, null, p, proj.owner);
+
+                    // Buat proyektil pengganti milik SERVER (owner = 255)
+                    int newIdx = Projectile.NewProjectile(
+                        Projectile.GetNoneSource(),
+                        spawnPos,
+                        straightVel,
+                        ProjectileID.GoldenShowerFriendly,
+                        dmg,
+                        kb,
+                        Main.maxPlayers
+                    );
+
+                    if (newIdx >= 0 && newIdx < Main.maxProjectiles)
+                    {
+                        Projectile newProj = Main.projectile[newIdx];
+                        newProj.friendly = true;
+                        newProj.hostile = false;
+                        serverStraightStreams[newIdx] = straightVel;
+                        NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, newIdx);
                     }
+                    continue;
                 }
 
-                proj.velocity = lockedVelocities[p];
-
-                if (proj.timeLeft % 3 == 0)
+                // 2. Pertahankan proyektil milik SERVER (owner = 255) agar tetap lurus tanpa melengkung jatuh
+                if (proj.owner == Main.maxPlayers && serverStraightStreams.TryGetValue(p, out Vector2 lockedVel))
                 {
-                    NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, p);
+                    proj.velocity = lockedVel;
+                    if (proj.timeLeft % 3 == 0)
+                    {
+                        NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, p);
+                    }
                 }
             }
         }
